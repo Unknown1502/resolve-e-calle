@@ -129,7 +129,7 @@ class TestEnvExampleNeverCarriesARealKey:
                 return
         raise AssertionError("CALLE_API_KEY= line not found in .env.example at all")
 
-    def test_no_high_entropy_iams_key_anywhere_git_would_stage(self) -> None:
+    def test_no_real_calle_credential_anywhere_git_would_stage(self) -> None:
         import re
         import shutil
         import subprocess

@@ -29,7 +29,15 @@ else
 fi
 
 echo "== tracked files =="
-if git ls-files -z 2>/dev/null | xargs -0 grep -IEl "$PATTERN" 2>/dev/null | grep -v '^scripts/check_secrets.sh$'; then
+# STRICT_PATTERN, not the loose PATTERN: this scans real committed
+# source/test/doc content, which is exactly where the loose pattern's
+# known false positives live (a comment describing the key format in
+# logging_setup.py, the "iams_test_key" placeholder used throughout
+# the SDK contract tests). This check was a silent no-op for the whole
+# life of the project until the first commit existed, so it was never
+# actually exercised against that content until CI ran it for real --
+# it failed the very first time, on exactly those false positives.
+if git ls-files -z 2>/dev/null | xargs -0 grep -IEl "$STRICT_PATTERN" 2>/dev/null | grep -v '^scripts/check_secrets.sh$'; then
   echo "  FAIL: a credential is committed"; fail=1
 else
   echo "  ok: no credential in tracked files"
