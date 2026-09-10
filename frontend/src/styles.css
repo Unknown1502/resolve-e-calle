@@ -1,0 +1,470 @@
+/* Resolve-E operations console.
+ *
+ * The design decision that drives everything else: the three outcomes
+ * are PEERS, not a good/bad gradient. "This one needs a person" is a
+ * correct result, not a failure, so it does not get an alarm colour.
+ * Traffic-light styling would contradict the product.
+ */
+
+:root {
+  --paper: #f7f8fa;
+  --surface: #ffffff;
+  --ink: #1b2a3a;
+  --ink-2: #4a5b6e;
+  --ink-3: #7f8fa1;
+  --rule: #dfe4ea;
+  --rule-strong: #c3ccd7;
+
+  /* Peer statuses. Similar chroma and lightness on purpose. */
+  --resolved: #1f7a5c;
+  --resolved-bg: #e8f3ef;
+  --attention: #b4530a;
+  --attention-bg: #fbeee2;
+  --working: #2d5baa;
+  --working-bg: #e8eefa;
+  --idle: #6b7a8d;
+  --idle-bg: #eef1f5;
+
+  --agent: #5b4b8a;
+
+  --shadow: 0 1px 2px rgba(27, 42, 58, 0.06), 0 8px 24px -12px rgba(27, 42, 58, 0.18);
+
+  --sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Mono is reserved for real identifiers and tabular numerals.
+   * It is never used as decoration on a label. */
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; }
+
+/* ── shell ─────────────────────────────────────────────────────── */
+
+.shell { display: flex; flex-direction: column; height: 100%; }
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.wordmark {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.masthead .context { color: var(--ink-3); font-size: 13px; }
+
+.mode {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--rule-strong);
+  color: var(--ink-2);
+  background: var(--paper);
+}
+
+.mode .bulb {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--idle);
+}
+.mode.live { border-color: var(--resolved); color: var(--resolved); background: var(--resolved-bg); }
+.mode.live .bulb { background: var(--resolved); }
+
+/* ── two-pane body ─────────────────────────────────────────────── */
+
+.panes { display: flex; flex: 1; min-height: 0; }
+
+.queue {
+  width: 46%;
+  min-width: 420px;
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+.queue-head {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tally {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 3px;
+}
+.tally .qty { font-family: var(--mono); font-weight: 500; }
+
+.tally-sub { color: var(--ink-3); margin: 0 0 14px; font-size: 13px; }
+
+.call-all {
+  width: 100%;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.call-all:hover:not(:disabled) { background: #24384c; }
+.call-all:disabled { background: var(--ink-3); cursor: not-allowed; }
+.call-all:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
+
+.dispatch-note {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+.dispatch-note code { font-family: var(--mono); font-size: 12px; color: var(--agent); }
+
+.rows { overflow-y: auto; flex: 1; }
+
+.row {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 12px 22px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-left: 3px solid transparent;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.row:hover { background: var(--paper); }
+.row[aria-current="true"] {
+  background: var(--paper);
+  border-left-color: var(--ink);
+}
+.row:focus-visible { outline: 2px solid var(--working); outline-offset: -2px; }
+
+.row .po {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.row .supplier { font-weight: 500; }
+.row .overdue {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.row .why {
+  grid-column: 2 / -1;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── status chip: a stamp, not a traffic light ─────────────────── */
+
+.stamp {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.stamp.resolved  { color: var(--resolved);  background: var(--resolved-bg);  border-color: #bfded2; }
+.stamp.attention { color: var(--attention); background: var(--attention-bg); border-color: #eccfb2; }
+.stamp.working   { color: var(--working);   background: var(--working-bg);   border-color: #c2d2ee; }
+.stamp.idle      { color: var(--idle);      background: var(--idle-bg);      border-color: var(--rule-strong); }
+
+/* ── detail ────────────────────────────────────────────────────── */
+
+.detail { flex: 1; overflow-y: auto; padding: 24px 30px 60px; min-width: 0; }
+
+.empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--ink-3);
+  max-width: 34ch;
+  margin: 0 auto;
+}
+
+.detail-head { margin-bottom: 22px; }
+.detail-head .po-big {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-3);
+  margin: 0 0 2px;
+}
+.detail-head h2 {
+  margin: 0 0 10px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.verdict .rationale {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  max-width: 68ch;
+}
+
+section.block { margin-top: 28px; }
+section.block > h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+section.block > .lede {
+  margin: -6px 0 12px;
+  font-size: 13px;
+  color: var(--ink-3);
+  max-width: 70ch;
+}
+
+/* Structured result: a form the supplier filled in by voice. */
+.evidence {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.evidence dl { margin: 0; }
+.field {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 14px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.field:last-child { border-bottom: 0; }
+.field dt { color: var(--ink-2); font-size: 13px; }
+.field dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.field dd.unknown { color: var(--attention); }
+
+.transcript {
+  margin: 12px 0 0;
+  padding: 12px 16px;
+  border-left: 3px solid var(--rule-strong);
+  color: var(--ink-2);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.callmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+  margin-bottom: 12px;
+}
+.callmeta div { min-width: 0; }
+.callmeta .k { font-size: 11.5px; color: var(--ink-3); }
+.callmeta .v {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.meter {
+  width: 62px; height: 5px;
+  border-radius: 3px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.meter i { display: block; height: 100%; background: var(--working); }
+
+/* ── ledger: the chain of custody ──────────────────────────────── */
+
+.ledger { border-top: 1px solid var(--rule); }
+.entry {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.entry time {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  padding-top: 1px;
+}
+.entry .what { font-size: 13.5px; }
+.entry .actor {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-left: 6px;
+}
+.entry .actor.policy { color: var(--agent); }
+.shift {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+.shift .arrow { color: var(--ink-3); margin: 0 5px; }
+
+.decisions { display: grid; gap: 8px; }
+.decision {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--agent);
+  border-radius: 6px;
+  padding: 10px 13px;
+  background: var(--surface);
+}
+.decision .code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--agent);
+}
+.decision p { margin: 3px 0 0; font-size: 13.5px; color: var(--ink-2); }
+
+.banner {
+  padding: 11px 14px;
+  border-radius: 7px;
+  font-size: 13.5px;
+  margin-bottom: 16px;
+  border: 1px solid;
+}
+.banner.info { background: var(--working-bg); border-color: #c2d2ee; color: #1e3f78; }
+.banner.warn { background: var(--attention-bg); border-color: #eccfb2; color: #8a3f07; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+@media (max-width: 900px) {
+  .panes { flex-direction: column; }
+  .queue { width: 100%; min-width: 0; border-right: 0; border-bottom: 1px solid var(--rule); max-height: 46vh; }
+}
+
+/* CALL-E's own evidence for the outcome it reported. Quoted rather than
+ * styled as data: these are fragments of what a person said, and they
+ * should read that way. */
+.evidence-lede { margin: 14px 0 6px; }
+
+.quotes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.quotes li {
+  position: relative;
+  padding: 7px 12px 7px 26px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+.quotes li::before {
+  content: "\201C";
+  position: absolute;
+  left: 9px;
+  top: 6px;
+  font-size: 19px;
+  line-height: 1;
+  color: var(--rule-strong);
+}
+
+/* ── transcript ────────────────────────────────────────────────── */
+/* A record of a conversation, so it reads as dialogue: the two
+ * speakers are distinguished by indent and rule colour rather than by
+ * chat bubbles, which would imply a messaging product. */
+
+.transcript-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.turn {
+  display: grid;
+  grid-template-columns: 82px 1fr 46px;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.turn:last-child { border-bottom: 0; }
+
+.turn .who {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.turn.bot .who { color: var(--agent); }
+.turn.user .who { color: var(--ink); }
+
+.turn p { margin: 0; font-size: 13.5px; }
+.turn.user p { font-weight: 500; }
+
+.turn .at {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+@media (max-width: 620px) {
+  .turn { grid-template-columns: 1fr; gap: 2px; }
+  .turn .at { text-align: left; }
+}

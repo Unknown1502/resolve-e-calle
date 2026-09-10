@@ -1,0 +1,109 @@
+name: resolve-e
+
+# One command brings up the whole system:
+#
+#   docker compose up --build
+#
+# The api service migrates and seeds on start, so a judge reaches a
+# populated dashboard at http://localhost:8000 without running anything
+# else. No real phone call is placed unless CALLE_LIVE_CALLS=true.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: resolvee
+      POSTGRES_PASSWORD: resolvee
+      POSTGRES_DB: resolvee
+    ports:
+      # High host port: 5432 and 5433 are commonly already taken by a
+      # local PostgreSQL install. Inside the compose network the
+      # services still reach postgres on 5432.
+      - "55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resolvee -d resolvee"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      # Same reasoning as postgres above.
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: &backend_env
+      APP_ENV: docker
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+psycopg://resolvee:resolvee@postgres:5432/resolvee
+      REDIS_URL: redis://redis:6379/0
+      # Empty by default: the system runs on the deterministic mock and
+      # places no real calls until you opt in.
+      CALLE_API_KEY: ${CALLE_API_KEY:-}
+      CALLE_LIVE_CALLS: ${CALLE_LIVE_CALLS:-false}
+      CALLE_WEBHOOK_URL: ${CALLE_WEBHOOK_URL:-}
+      CALLE_ALLOWED_NUMBERS: ${CALLE_ALLOWED_NUMBERS:-}
+      MAX_ATTEMPTS: "3"
+      DELAY_THRESHOLD_HOURS: "48"
+      MIN_COMPLETION_CONFIDENCE: "0.70"
+    command: >
+      sh -c "resolve-e init-db &&
+             resolve-e seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *backend_env
+    command: python -m app.workers.runner
+    # The image's HEALTHCHECK probes :8000, which only the api serves.
+    # A worker reporting unhealthy for not being a web server is noise.
+    healthcheck:
+      disable: true
+
+  # Optional: a public HTTPS URL for CALL-E webhooks.
+  #
+  #   docker compose --profile tunnel up -d tunnel
+  #   docker compose logs tunnel | grep trycloudflare.com
+  #
+  # Then put <that-url>/webhooks/calle in CALLE_WEBHOOK_URL and restart
+  # the api. Entirely optional: without it the reconciliation worker
+  # still finishes every call by polling, which is why the demo needs no
+  # tunnel at all.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    depends_on:
+      api:
+        condition: service_started
+    command: tunnel --no-autoupdate --url http://api:8000
+    restart: unless-stopped
+
+volumes:
+  pgdata:

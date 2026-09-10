@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (lint, types, tests)
+    runs-on: ubuntu-latest
+
+    services:
+      # Tests run against real PostgreSQL. The schema uses JSONB and
+      # FOR UPDATE SKIP LOCKED, so proving it on SQLite would prove
+      # nothing about how it behaves in production.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: resolvee
+          POSTGRES_PASSWORD: resolvee
+          POSTGRES_DB: resolvee
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U resolvee -d resolvee"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      ADMIN_DATABASE_URL: postgresql+psycopg://resolvee:resolvee@localhost:5432/resolvee
+      DATABASE_URL: postgresql+psycopg://resolvee:resolvee@localhost:5432/resolvee
+      # No key: CI must never be able to place a real phone call.
+      CALLE_LIVE_CALLS: "false"
+      CALLE_API_KEY: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check backend/
+
+      - name: Types
+        run: mypy backend/app
+
+      - name: Migrations apply and roll back
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Tests
+        run: pytest -q
+
+  frontend:
+    name: frontend (typecheck, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm install
+        working-directory: frontend
+      - name: Typecheck and build
+        run: npm run build
+        working-directory: frontend
+
+  submission:
+    name: skill passes the awesome-phone-call-agents rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/check_skill.py
+
+  secrets:
+    name: no credential reaches the bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm install && npm run build
+        working-directory: frontend
+      - name: Scan
+        run: bash scripts/check_secrets.sh
