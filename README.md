@@ -123,18 +123,27 @@ from memory.
 
 ## Architecture
 
-```
-Browser ──► Resolve-E API ──► Policy engine (pure, deterministic)
-                │                    │
-                │              State machine ──► PostgreSQL
-                │                                    ▲
-                └──► Outbox ──► Worker ──► CALL-E adapter ──► CALL-E ──► supplier
-                                   ▲                             │
-                                   └──── reconcile ◄── webhook ◄──┘
+```mermaid
+flowchart TB
+    Browser -->|HTTPS| API[Resolve-E API]
+    API --> Policy["Policy engine<br/>(pure, deterministic)"]
+    API --> SM[State machine]
+    API -->|writes| Outbox[(Outbox table)]
+    SM --> DB[(PostgreSQL)]
+    Policy --> DB
+    Outbox --> Worker[Worker]
+    Worker -. advisory lock .-> Redis[(Redis)]
+    Worker --> Adapter[CALL-E adapter]
+    Adapter --> CallE[CALL-E]
+    CallE -->|phone call| Supplier((Supplier))
+    CallE -. terminal webhook .-> API
+    Worker -. reconcile .-> CallE
 ```
 
 The CALL-E API key lives only in the backend process. The browser talks to
-Resolve-E and never to CALL-E.
+Resolve-E and never to CALL-E. Redis is a lock and a wake-up nudge only — the
+queue of work is the `Outbox table` itself, because it is written in the same
+database transaction as the state change that produced it (`workers/runner.py`).
 
 **The webhook is not the decision engine.** It validates shape, dedupes on the
 provider event id, writes an outbox row, and returns 2xx — nothing else. The

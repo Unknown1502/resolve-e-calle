@@ -7,8 +7,10 @@ flowchart LR
     O[Operations User] --> UI[Resolve-E Dashboard]
     UI --> API[Resolve-E API]
     API --> DB[(PostgreSQL)]
-    API --> Q[Job Queue]
-    Q --> ORCH[Call Orchestrator]
+    API -->|writes| OUT[(Outbox Table)]
+    OUT --> WRK[Worker]
+    WRK -. advisory lock .-> R[(Redis)]
+    WRK --> ORCH[Call Orchestrator]
     ORCH --> CE[CALL-E API]
     CE --> PHONE[Supplier Phone]
     CE --> WH[CALL-E Terminal Event]
@@ -16,6 +18,11 @@ flowchart LR
     API --> POLICY[Deterministic Policy Engine]
     POLICY --> DB
 ```
+
+The outbox table -- not Redis -- is the queue: it is written in the same
+transaction as the state change that produced it, which a Redis-backed queue
+cannot be (`backend/app/workers/runner.py`). Redis is used only for an
+advisory distributed lock and a wake-up nudge.
 
 ## 2. Closed-loop resolution
 
